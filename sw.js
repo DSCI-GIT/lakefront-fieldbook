@@ -1,4 +1,4 @@
-const CACHE='lakefront-fieldbook-v2';
+const CACHE='lakefront-fieldbook-v3';
 const FILES=['./','./index.html','./styles.css','./app.js','./core.js','./config.js','./vendor/leaflet.js','./vendor/leaflet.css','./data/poles.geojson','./data/streets.geojson','./data/Lakefront-transformer-poles.kmz','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('lakefront-fieldbook-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));

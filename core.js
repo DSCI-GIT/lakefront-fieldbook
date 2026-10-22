@@ -12,4 +12,4 @@ export function reduceEvents(events) {
 }
 export function mergeEvents(a,b){return [...new Map([...a,...b].map(e=>[e.id,e])).values()];}
 export function distanceMetres(a,b){const r=Math.PI/180,dlat=(b[0]-a[0])*r,dlon=(b[1]-a[1])*r;return 6371000*2*Math.asin(Math.min(1,Math.sqrt(Math.sin(dlat/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dlon/2)**2)));}
-export function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"';}
+export function csvCell(v){const s=typeof v==='string'&&/^[=+\-@\t\r]/.test(v)?"'"+v:String(v??'');return '"'+s.replace(/"/g,'""')+'"';}

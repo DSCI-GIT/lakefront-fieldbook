@@ -1,8 +1,9 @@
 import {validEvent,reduceEvents,distanceMetres,csvCell} from './core.js';
+import {heliport, photoLabels, photoColours, addPlanningStatus, matchesPlanningFilter} from './planning.js';
 import {activeWorker,offlineRequest} from './offline.js';
 const $=id=>document.getElementById(id), config=window.FIELD_CONFIG;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let db, poles=[], ids, state=new Map(), allEvents=[], selected=null, markers=new Map(), filter='todo', nearest=false, gps=null, geoWatch=null, syncing=false, offlineReady=false, toastTimer;
+let db, poles=[], ids, state=new Map(), allEvents=[], selected=null, markers=new Map(), filter='all', photoFilter='remaining', heliportOnly=false, nearest=false, gps=null, geoWatch=null, syncing=false, offlineReady=false, toastTimer;
 let settings=JSON.parse(localStorage.getItem('fieldbook-settings')||'{}');
 settings={name:'Crew member',code:'',url:config.syncUrl,...settings};
 const channel='BroadcastChannel' in window?new BroadcastChannel('lakefront-fieldbook'):null;
@@ -10,6 +11,15 @@ const map=L.map('map',{preferCanvas:true,zoomControl:true}).setView([43.973,-78.
 map.attributionControl.setPrefix(false);
 map.attributionControl.addAttribution('<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors · ODbL</a>');
 const roadLayer=L.layerGroup().addTo(map), labelLayer=L.layerGroup().addTo(map), poleLayer=L.layerGroup().addTo(map),gpsLayer=L.layerGroup().addTo(map);
+map.createPane('heliport').style.zIndex = 350;
+const heliportCircle = L.circle(heliport.centre, {
+  pane: 'heliport', radius: heliport.radius, color: '#a32035',
+  fillColor: '#ed8950', fillOpacity: 0.19, weight: 2, interactive: false
+}).addTo(map);
+L.circleMarker(heliport.centre, {pane: 'heliport', radius: 6, color: '#a32035', fillColor: '#fff', fillOpacity: 1})
+  .bindTooltip('CNB4 · Northumberland Hills Hospital · 1 NM planning circle')
+  .bindPopup('<strong>CNB4 · Northumberland Hills Hospital</strong><br>1 NM (1,852 m) planning circle.<br><a href="https://map.navdrone.ca/" target="_blank" rel="noopener">Check current airspace in NAV Drone</a>')
+  .addTo(map);
 let onlineLayer;
 let workerRegistration,offlinePreparing=false;
 function registerOffline(){
@@ -24,19 +34,29 @@ function readEvents(){return new Promise((resolve,reject)=>{const r=db.transacti
 function writeEvents(events){return new Promise((resolve,reject)=>{const tx=db.transaction('events','readwrite'),s=tx.objectStore('events');for(const e of events)s.put(e);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Storage write was aborted'));});}
 async function refresh(){allEvents=await readEvents();state=reduceEvents(allEvents);render();}
 function data(p){return state.get(p.properties.pole_id)||{done:false,notes:[]};}
-function colour(p){return data(p).done?'#18764e':'#cc7d1e';}
+function markerStyle(p, active=false) {
+  return {
+    fillColor: photoColours[p.planning.photo],
+    fillOpacity: 1,
+    color: p.planning.inHeliport ? '#a32035' : p.planning.nearHeliportBoundary ? '#a05b00' : active ? '#123b35' : '#fff',
+    weight: p.planning.inHeliport || p.planning.nearHeliportBoundary || active ? 3 : 1.7
+  };
+}
 function render(){
- const count=poles.filter(p=>data(p).done).length;$('doneCount').textContent=count;$('todoCount').textContent=poles.length-count;$('progressBar').style.width=`${count/poles.length*100}%`;
+ const count=poles.filter(p=>data(p).done).length;$('doneCount').textContent=count;$('progressBar').style.width=`${count/poles.length*100}%`;
  const q=$('search').value.toLowerCase().trim();
- let list=poles.filter(p=>{const a=p.properties,d=data(p);return(filter==='all'||filter==='todo'&&!d.done||filter==='done'&&d.done||filter==='verify'&&a.status.startsWith('VERIFY'))&&(!q||[a.pole_id,a.other_id,a.address].some(v=>String(v).toLowerCase().includes(q)));});
+ let list=poles.filter(p=>{const a=p.properties,d=data(p);return matchesPlanningFilter(p.planning, photoFilter, heliportOnly)&&(filter==='all'||filter==='todo'&&!d.done||filter==='done'&&d.done||filter==='verify'&&a.status.startsWith('VERIFY'))&&(!q||[a.pole_id,a.other_id,a.address].some(v=>String(v).toLowerCase().includes(q)));});
  if(nearest&&gps)list.sort((a,b)=>distanceMetres(gps,[a.geometry.coordinates[1],a.geometry.coordinates[0]])-distanceMetres(gps,[b.geometry.coordinates[1],b.geometry.coordinates[0]]));
  $('listHeading').textContent=`${list.length} ${filter==='done'?'completed':'locations'}`;
- $('poleList').innerHTML=list.length?list.map(p=>{const a=p.properties,d=data(p),dist=gps?distanceMetres(gps,[p.geometry.coordinates[1],p.geometry.coordinates[0]]):null;return`<button class="pole-row ${d.done?'complete':''} ${selected===a.pole_id?'selected':''}" data-pole="${esc(a.pole_id)}"><span class="row-icon">${d.done?'✓':a.status.startsWith('VERIFY')?'?':'·'}</span><span class="row-body"><span class="row-title">Pole ${esc(a.pole_id)}</span><div class="row-address">${esc(a.address)}</div><div class="row-extra">${esc(a.other_id||'Transformer ID not recorded')}${a.status.startsWith('VERIFY')?' · VERIFY':''}${d.notes.length?` · ${d.notes.length} note${d.notes.length>1?'s':''}`:''}</div></span>${dist!==null?`<span class="distance">${dist<1000?Math.round(dist)+' m':(dist/1000).toFixed(1)+' km'}</span>`:''}</button>`;}).join(''):'<div class="empty">No locations match this view.</div>';
+ $('poleList').innerHTML=list.length?list.map(p=>{const a=p.properties,d=data(p),dist=gps?distanceMetres(gps,[p.geometry.coordinates[1],p.geometry.coordinates[0]]):null;return`<button class="pole-row ${d.done?'complete':''} ${selected===a.pole_id?'selected':''}" data-pole="${esc(a.pole_id)}"><span class="row-icon">${d.done?'✓':a.status.startsWith('VERIFY')?'?':'·'}</span><span class="row-body"><span class="row-title">Pole ${esc(a.pole_id)}</span><div class="row-address">${esc(a.address)}</div><div class="row-extra">${esc(a.other_id||'Transformer ID not recorded')}${a.status.startsWith('VERIFY')?' · VERIFY':''} · ${photoLabels[p.planning.photo]}${p.planning.inHeliport?' · Inside CNB4':p.planning.nearHeliportBoundary?' · Near CNB4 edge':''}${d.notes.length?` · ${d.notes.length} note${d.notes.length>1?'s':''}`:''}</div></span>${dist!==null?`<span class="distance">${dist<1000?Math.round(dist)+' m':(dist/1000).toFixed(1)+' km'}</span>`:''}</button>`;}).join(''):'<div class="empty">No locations match this view.</div>';
  const visibleIds=new Set(list.map(p=>p.properties.pole_id));
- for(const p of poles){const id=p.properties.pole_id,m=markers.get(id);m.setStyle({fillColor:colour(p),color:id===selected?'#123b35':'#fff',weight:id===selected?3:1.7});m.setRadius(id===selected?9:6);if(visibleIds.has(id)||id===selected){if(!poleLayer.hasLayer(m))poleLayer.addLayer(m);}else poleLayer.removeLayer(m);}
+ for(const p of poles){const id=p.properties.pole_id,m=markers.get(id);m.setStyle(markerStyle(p,id===selected));m.setRadius(id===selected?9:6);if(visibleIds.has(id)){if(!poleLayer.hasLayer(m))poleLayer.addLayer(m);}else poleLayer.removeLayer(m);}
  updateDetail();updateSyncLabel();
 }
-function updateDetail(){if(!selected)return;const p=poles.find(p=>p.properties.pole_id===selected);if(!p)return;const a=p.properties,d=data(p);$('detailTitle').textContent='Pole '+a.pole_id;$('detailAddress').textContent=a.address;$('detailMeta').textContent=(a.other_id||'Transformer ID not recorded')+' · '+a.latitude.toFixed(6)+', '+a.longitude.toFixed(6);$('detailStatus').textContent=d.done?'PHOTOGRAPHED':'TO BE PHOTOGRAPHED';$('completeButton').textContent=d.done?'↶ Reopen / mark to do':'✓ Mark photographed';$('completeButton').classList.toggle('is-done',d.done);$('completedAt').textContent=d.done?`Completed ${time(d.statusEvent.at)} by ${d.statusEvent.by}`:'';$('sourceObservations').textContent=[a.observations,a.comments,a.recommendation].filter(Boolean).join('\n');$('verifyWarning').classList.toggle('hidden',!a.status.startsWith('VERIFY'));$('noteList').innerHTML=d.notes.map(n=>`<div class="note">${esc(n.value)}<small>${esc(n.by)} · ${time(n.at)}</small></div>`).join('')||'<p class="muted">No notes yet.</p>';}
+function updateDetail(){if(!selected)return;const p=poles.find(p=>p.properties.pole_id===selected);if(!p)return;const a=p.properties,d=data(p);$('detailTitle').textContent='Pole '+a.pole_id;$('detailAddress').textContent=a.address;$('detailMeta').textContent=(a.other_id||'Transformer ID not recorded')+' · '+a.latitude.toFixed(6)+', '+a.longitude.toFixed(6);$('photoDetail').textContent = photoLabels[p.planning.photo] + ' · October 22';
+$('zoneDetail').classList.toggle('hidden', !(p.planning.inHeliport || p.planning.nearHeliportBoundary));
+$('zoneDetail').textContent = (p.planning.inHeliport ? 'Inside CNB4 planning circle' : 'Outside CNB4 planning circle') + ' · ' + Math.round(p.planning.heliportDistance).toLocaleString('en-CA') + ' m from heliport' + (p.planning.nearHeliportBoundary ? ' · Near boundary, verify in NAV Drone' : '');
+$('detailStatus').textContent=d.done?'PHOTOGRAPHED':'TO BE PHOTOGRAPHED';$('completeButton').textContent=d.done?'↶ Reopen / mark to do':'✓ Mark photographed';$('completeButton').classList.toggle('is-done',d.done);$('completedAt').textContent=d.done?`Completed ${time(d.statusEvent.at)} by ${d.statusEvent.by}`:'';$('sourceObservations').textContent=[a.observations,a.comments,a.recommendation].filter(Boolean).join('\n');$('verifyWarning').classList.toggle('hidden',!a.status.startsWith('VERIFY'));$('noteList').innerHTML=d.notes.map(n=>`<div class="note">${esc(n.value)}<small>${esc(n.by)} · ${time(n.at)}</small></div>`).join('')||'<p class="muted">No notes yet.</p>';}
 function selectPole(id){if(selected!==id&&$('noteInput').value.trim()){toast('Add or clear the current note before changing poles.');return;}selected=id;$('detail').classList.remove('hidden');document.body.classList.remove('show-list');$('mobileList').textContent='☷ Locations';const p=poles.find(p=>p.properties.pole_id===id);map.panTo([p.geometry.coordinates[1],p.geometry.coordinates[0]]);render();}
 function event(type,value,poleId=selected){return{id:crypto.randomUUID(),poleId,type,value,at:new Date().toISOString(),by:settings.name.trim()||'Crew member',jobId:config.jobId,pending:true};}
 async function saveLocal(es){await writeEvents(es);await refresh();channel?.postMessage('changed');void sync();}
@@ -68,12 +88,21 @@ async function prepareOffline(){
  finally{offlinePreparing=false;button.disabled=false;}
 }
 async function init(){try{
- db=await openDB();const [p,r]=await Promise.all([fetch('./data/poles.geojson').then(r=>r.json()),fetch('./data/streets.geojson').then(r=>r.json())]);poles=p.features;ids=new Set(poles.map(p=>p.properties.pole_id));$('totalCount').textContent=` / ${poles.length} locations`;
+ db=await openDB();const [p,r,matches]=await Promise.all(
+   ['poles.geojson','streets.geojson','photo-matches.json'].map(async name=>{
+     const response=await fetch('./data/'+name);
+     if(!response.ok)throw new Error('Could not load '+name);
+     return response.json();
+   })
+ );
+ poles=p.features;
+ addPlanningStatus(poles,matches);
+ $('zoneCount').textContent=poles.filter(p=>p.planning.inHeliport).length;ids=new Set(poles.map(p=>p.properties.pole_id));$('totalCount').textContent=` / ${poles.length} locations`;
  const labels=new Map();L.geoJSON(r,{style:f=>({color:f.properties.natural==='water'?'#a9cbd3':'#fff',weight:['motorway','trunk'].includes(f.properties.highway)?5:['primary','secondary','tertiary'].includes(f.properties.highway)?3:1.8,opacity:.9}),interactive:false}).addTo(roadLayer);
  L.geoJSON(r,{style:f=>({color:'#b8c3ad',weight:['motorway','trunk'].includes(f.properties.highway)?6:['primary','secondary','tertiary'].includes(f.properties.highway)?4:2.6,opacity:.6}),interactive:false}).addTo(roadLayer).bringToBack();
  for(const f of r.features){if(f.properties.name&&f.geometry.coordinates.length>1&&!labels.has(f.properties.name)){labels.set(f.properties.name,true);const c=f.geometry.coordinates[Math.floor(f.geometry.coordinates.length/2)];L.marker([c[1],c[0]],{icon:L.divIcon({className:'road-label',html:esc(f.properties.name),iconSize:[140,12]}),interactive:false}).addTo(labelLayer);}}
  map.on('zoomend',()=>{if($('layer').value==='offline'){if(map.getZoom()>=16)labelLayer.addTo(map);else map.removeLayer(labelLayer);}});labelLayer.remove();
- for(const p of poles){const c=p.geometry.coordinates,m=L.circleMarker([c[1],c[0]],{radius:6,weight:1.7,color:'#fff',fillColor:colour(p),fillOpacity:1}).bindTooltip('Pole '+esc(p.properties.pole_id),{direction:'top'});m.on('click',()=>selectPole(p.properties.pole_id));markers.set(p.properties.pole_id,m);}
+ for(const p of poles){const c=p.geometry.coordinates,m=L.circleMarker([c[1],c[0]],{radius:6,...markerStyle(p)}).bindTooltip('Pole '+esc(p.properties.pole_id)+' · '+photoLabels[p.planning.photo]+(p.planning.inHeliport?' · Inside CNB4':p.planning.nearHeliportBoundary?' · Near CNB4 edge':''),{direction:'top'});m.on('click',()=>selectPole(p.properties.pole_id));markers.set(p.properties.pole_id,m);}
  map.fitBounds(poles.map(p=>[p.geometry.coordinates[1],p.geometry.coordinates[0]]),{padding:[30,30]});await refresh();
  void registerOffline().then(activeWorker).then(worker=>offlineRequest(worker)).then(result=>{if(!offlinePreparing)offlineStatus(result.ready,result.ready?'Offline files are saved on this device. Use the button below to check them again.':'Offline files are incomplete. Use Keep this job offline while connected.');}).catch(e=>{if(!offlinePreparing)offlineStatus(false,e.message);});
  if(!localStorage.getItem('fieldbook-introduced')){openSettings();localStorage.setItem('fieldbook-introduced','1');}void sync();
@@ -81,7 +110,18 @@ async function init(){try{
 function openSettings(){$('crewName').value=settings.name;$('crewCode').value=settings.code;$('syncUrl').value=settings.url;$('settings').showModal();updateSyncLabel();}
 $('settingsButton').onclick=openSettings;$('closeSettings').onclick=()=>$('settings').close();$('showCode').onclick=()=>{$('crewCode').type=$('crewCode').type==='password'?'text':'password';};
 $('settingsForm').onsubmit=e=>{e.preventDefault();const url=$('syncUrl').value.trim();try{const u=new URL(url);if(u.protocol!=='https:'&&u.hostname!=='localhost')throw new Error();}catch{toast('Enter a valid HTTPS sync URL');return;}settings={name:$('crewName').value.trim(),code:$('crewCode').value.trim(),url};localStorage.setItem('fieldbook-settings',JSON.stringify(settings));$('settings').close();void sync();};
-$('search').oninput=render;document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b));render();});
+$('search').oninput=render;$('photoFilter').onchange = e => { photoFilter = e.target.value; render(); };
+$('crewFilter').onchange = e => { filter = e.target.value; render(); };
+$('heliportOnly').onclick = () => {
+  heliportOnly = !heliportOnly;
+  $('heliportOnly').setAttribute('aria-pressed', heliportOnly);
+  if (heliportOnly) {
+    photoFilter = $('photoFilter').value = 'all';
+    filter = $('crewFilter').value = 'all';
+    map.fitBounds(heliportCircle.getBounds(), {padding:[20,20]});
+  }
+  render();
+};
 $('poleList').onclick=e=>{const row=e.target.closest('[data-pole]');if(row)selectPole(row.dataset.pole);};$('sortButton').onclick=()=>{if(!gps){void gpsStart();return;}nearest=!nearest;$('sortButton').textContent=nearest?'Nearest first ↕':'Street order ↕';render();};$('gpsButton').onclick=gpsStart;$('gpsStatus').onclick=gpsStart;$('fitButton').onclick=()=>map.fitBounds(poles.map(p=>[p.geometry.coordinates[1],p.geometry.coordinates[0]]),{padding:[30,30]});$('layer').onchange=switchLayer;
 $('mobileList').onclick=()=>{document.body.classList.toggle('show-list');$('mobileList').textContent=document.body.classList.contains('show-list')?'⌖ Back to map':'☷ Locations';};
 $('completeButton').onclick=complete;$('closeDetail').onclick=()=>{if($('noteInput').value.trim()){toast('Add or clear this note before closing.');return;}selected=null;$('detail').classList.add('hidden');render();};

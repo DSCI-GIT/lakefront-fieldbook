@@ -21,6 +21,8 @@ Detailed Cobourg street geometry is bundled locally, including road names. This 
 
 OpenStreetMap contributors provide bundled road geometry under ODbL: https://www.openstreetmap.org/copyright . Source geometry was downloaded for bbox 43.947,-78.226,44.000,-78.109 on October 21/22, 2026 using Overpass. Source data is in `data/streets.geojson`. Leaflet 1.9.4 is bundled under the BSD-2-Clause license.
 
+The **Schools** control toggles the offline school layer. Blue outlines show mapped school grounds and **S** pins identify the schools. Geometry is from OpenStreetMap. The two additional private school pins use approximate locations checked against school contact pages. The former St. Michael campus is excluded following the board's June 2026 closure. The layer shows school locations for planning around arrival and dismissal.
+
 ## Inventory and records
 
 The 431 map points come from the earlier Lakefront transformer KMZ/GeoJSON. 428 poles are explicitly marked as having transformers, 3 are ID-only candidates. Duplicate pole 2801 uses the newer inspection location. Pole coordinates and historical attributes are not a current transformer survey. No flight automation is provided.

@@ -46,3 +46,9 @@
 }
 #heliportOnly[aria-pressed="true"] { background: #fae1df; border-color: #a32035; }
 .photo-detail { font-weight: 650; }
+
+.school-key,.school-pin{background:#176795;border:2px solid white;border-radius:4px;color:white}
+.school-key{display:inline-block;width:12px;height:12px;border:1px solid #176795;vertical-align:-1px}
+.school-pin{display:grid;place-items:center;font-weight:700;box-shadow:0 1px 3px #14334466}
+#schoolsToggle{font-size:11px;padding:6px 8px;color:#125477}
+#schoolsToggle[aria-pressed="true"]{background:#e4f4ff;border-color:#176795}

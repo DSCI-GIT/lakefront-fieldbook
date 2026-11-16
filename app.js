@@ -20,6 +20,38 @@ L.circleMarker(heliport.centre, {pane: 'heliport', radius: 6, color: '#a32035', 
   .bindTooltip('CNB4 · Northumberland Hills Hospital · 1 NM planning circle')
   .bindPopup('<strong>CNB4 · Northumberland Hills Hospital</strong><br>1 NM (1,852 m) planning circle.<br><a href="https://map.navdrone.ca/" target="_blank" rel="noopener">Check current airspace in NAV Drone</a>')
   .addTo(map);
+map.createPane('schoolGrounds').style.zIndex = 375;
+const schoolsLayer = L.layerGroup().addTo(map);
+const schoolsToggle = $('schoolsToggle');
+schoolsToggle.onclick = () => {
+  const showing = !map.hasLayer(schoolsLayer);
+  if (showing) schoolsLayer.addTo(map);
+  else schoolsLayer.remove();
+  schoolsToggle.setAttribute('aria-pressed', showing);
+};
+
+async function loadSchools() {
+  const response = await fetch('./data/schools.geojson');
+  if (!response.ok) throw new Error('Could not load schools');
+  const data = await response.json();
+  const schoolIcon = L.divIcon({className: 'school-pin', html: 'S', iconSize: [22, 22]});
+  L.geoJSON(data, {
+    pane: 'schoolGrounds',
+    style: {color: '#176795', weight: 2, fillColor: '#43a6da', fillOpacity: 0.25},
+    pointToLayer: (_, location) => L.marker(location, {icon: schoolIcon}),
+    onEachFeature: (feature, layer) => {
+      const name = esc(feature.properties.name);
+      layer.bindTooltip(name);
+      const popup = '<strong>' + name + '</strong><br>Check school activity around arrival and dismissal.';
+      layer.bindPopup(popup);
+      if (layer.getBounds) {
+        L.marker(layer.getBounds().getCenter(), {icon: schoolIcon})
+          .bindTooltip(name).bindPopup(popup).addTo(schoolsLayer);
+      }
+    }
+  }).addTo(schoolsLayer);
+}
+
 let onlineLayer;
 let workerRegistration,offlinePreparing=false;
 function registerOffline(){
@@ -97,6 +129,11 @@ async function init(){try{
  );
  poles=p.features;
  addPlanningStatus(poles,matches);
+ void loadSchools().catch(() => {
+   schoolsToggle.disabled = true;
+   schoolsToggle.setAttribute('aria-pressed', false);
+   schoolsToggle.textContent = 'Schools unavailable';
+ });
  $('zoneCount').textContent=poles.filter(p=>p.planning.inHeliport).length;ids=new Set(poles.map(p=>p.properties.pole_id));$('totalCount').textContent=` / ${poles.length} locations`;
  const labels=new Map();L.geoJSON(r,{style:f=>({color:f.properties.natural==='water'?'#a9cbd3':'#fff',weight:['motorway','trunk'].includes(f.properties.highway)?5:['primary','secondary','tertiary'].includes(f.properties.highway)?3:1.8,opacity:.9}),interactive:false}).addTo(roadLayer);
  L.geoJSON(r,{style:f=>({color:'#b8c3ad',weight:['motorway','trunk'].includes(f.properties.highway)?6:['primary','secondary','tertiary'].includes(f.properties.highway)?4:2.6,opacity:.6}),interactive:false}).addTo(roadLayer).bringToBack();

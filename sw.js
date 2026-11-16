@@ -1,9 +1,9 @@
-const CACHE='lakefront-fieldbook-v5';
-const FILES=['./','./index.html','./styles.css?v=5','./app.js?v=5','./offline.js','./core.js','./planning.js','./data/photo-matches.json','./config.js','./vendor/leaflet.js','./vendor/leaflet.css','./data/poles.geojson','./data/streets.geojson','./data/Lakefront-transformer-poles.kmz','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting())));
+const CACHE='lakefront-fieldbook-v6';
+const FILES=['./','./index.html','./styles.css?v=6','./app.js?v=6','./offline.js','./core.js','./planning.js','./data/photo-matches.json','./config.js','./vendor/leaflet.js','./vendor/leaflet.css','./data/poles.geojson','./data/streets.geojson','./data/Lakefront-transformer-poles.kmz','./icon.svg','./icon-192.png','./icon-512.png','./manifest.webmanifest'];
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES.map(file => new Request(file, {cache:'reload'})))).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('lakefront-fieldbook-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin)return;
- if(e.request.mode==='navigate'){e.respondWith(fetch(e.request).then(r=>{if(r.ok)caches.open(CACHE).then(c=>c.put('./index.html',r.clone()));return r;}).catch(()=>caches.match('./index.html')));return;}
+ if(e.request.mode==='navigate'){e.respondWith(fetch(e.request,{cache:'reload'}).then(r=>r.ok?r:caches.open(CACHE).then(c=>c.match('./index.html')).then(saved=>saved||r)).catch(()=>caches.open(CACHE).then(c=>c.match('./index.html'))));return;}
  e.respondWith(caches.match(e.request).then(c=>c||fetch(e.request)));
 });
 self.addEventListener('message',e=>{

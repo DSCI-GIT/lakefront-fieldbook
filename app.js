@@ -104,10 +104,35 @@ async function init(){try{
  map.on('zoomend',()=>{if($('layer').value==='offline'){if(map.getZoom()>=16)labelLayer.addTo(map);else map.removeLayer(labelLayer);}});labelLayer.remove();
  for(const p of poles){const c=p.geometry.coordinates,m=L.circleMarker([c[1],c[0]],{radius:6,...markerStyle(p)}).bindTooltip('Pole '+esc(p.properties.pole_id)+' · '+photoLabels[p.planning.photo]+(p.planning.inHeliport?' · Inside CNB4':p.planning.nearHeliportBoundary?' · Near CNB4 edge':''),{direction:'top'});m.on('click',()=>selectPole(p.properties.pole_id));markers.set(p.properties.pole_id,m);}
  map.fitBounds(poles.map(p=>[p.geometry.coordinates[1],p.geometry.coordinates[0]]),{padding:[30,30]});await refresh();
- void registerOffline().then(activeWorker).then(worker=>offlineRequest(worker)).then(result=>{if(!offlinePreparing)offlineStatus(result.ready,result.ready?'Offline files are saved on this device. Use the button below to check them again.':'Offline files are incomplete. Use Keep this job offline while connected.');}).catch(e=>{if(!offlinePreparing)offlineStatus(false,e.message);});
+ void registerOffline().then(async registration => {
+  if (navigator.onLine) void registration.update().catch(() => {});
+  return activeWorker(registration);
+ }).then(worker=>offlineRequest(worker)).then(result=>{if(!offlinePreparing)offlineStatus(result.ready,result.ready?'Offline files are saved on this device. Use the button below to check them again.':'Offline files are incomplete. Use Keep this job offline while connected.');}).catch(e=>{if(!offlinePreparing)offlineStatus(false,e.message);});
  if(!localStorage.getItem('fieldbook-introduced')){openSettings();localStorage.setItem('fieldbook-introduced','1');}void sync();
  }catch(e){toast('Cannot open job: '+e.message);$('syncButton').textContent='Storage or map could not load';}}
 function openSettings(){$('crewName').value=settings.name;$('crewCode').value=settings.code;$('syncUrl').value=settings.url;$('settings').showModal();updateSyncLabel();}
+$('refreshMap').onclick = async () => {
+  if (!navigator.onLine) {
+    toast('Connect to the internet to refresh the map.');
+    return;
+  }
+  if ($('noteInput').value.trim()) {
+    toast('Save your pole note before refreshing.');
+    return;
+  }
+  const button = $('refreshMap');
+  button.disabled = true;
+  try {
+    const registration = await registerOffline();
+    await registration.update();
+    await activeWorker(registration);
+    location.reload();
+  } catch (error) {
+    toast('Could not refresh the map. ' + error.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 $('settingsButton').onclick=openSettings;$('closeSettings').onclick=()=>$('settings').close();$('showCode').onclick=()=>{$('crewCode').type=$('crewCode').type==='password'?'text':'password';};
 $('settingsForm').onsubmit=e=>{e.preventDefault();const url=$('syncUrl').value.trim();try{const u=new URL(url);if(u.protocol!=='https:'&&u.hostname!=='localhost')throw new Error();}catch{toast('Enter a valid HTTPS sync URL');return;}settings={name:$('crewName').value.trim(),code:$('crewCode').value.trim(),url};localStorage.setItem('fieldbook-settings',JSON.stringify(settings));$('settings').close();void sync();};
 $('search').oninput=render;$('photoFilter').onchange = e => { photoFilter = e.target.value; render(); };
